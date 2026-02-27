@@ -32,6 +32,20 @@ async def init_db() -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
+
+async def delete_connection(user_id: str, realm_id: str) -> bool:
+    async with AsyncSessionLocal() as session:
+        stmt = select(QBOConnection).where(
+            QBOConnection.user_id == user_id,
+            QBOConnection.realm_id == realm_id,
+        )
+        obj = (await session.execute(stmt)).scalars().first()
+        if not obj:
+            return False
+        await session.delete(obj)
+        await session.commit()
+        return True
+
 async def upsert_connection(user_id: str, realm_id: str, company_name: Optional[str],
                             access_token_enc: Optional[str], refresh_token_enc: str,
                             access_token_expires_at: Optional[datetime]) -> None:

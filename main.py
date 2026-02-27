@@ -113,7 +113,7 @@ async def intuit_callback(code: str, realmId: str, state: str):
         access_token_expires_at=expires_at,
     )
 
-    return JSONResponse({"connected": True, "realmId": realmId, "company_name": company_name, "user_id": user_id})
+    return RedirectResponse(url="/ui", status_code=302)
 
 
 # ---------------------------------------------------------------------------

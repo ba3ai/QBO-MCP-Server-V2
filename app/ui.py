@@ -8,7 +8,7 @@ import base64
 from fastapi import APIRouter, Request
 from fastapi.responses import RedirectResponse, HTMLResponse
 from fastapi.templating import Jinja2Templates
-
+from fastapi import Query
 from app import db
 from app.oidc_client import build_login_url, exchange_code_for_tokens, fetch_userinfo
 
@@ -97,6 +97,12 @@ async def callback(request: Request, code: str, state: str):
 @router.get("/logout")
 async def logout(request: Request):
     request.session.clear()
+
+    issuer = os.environ.get("OIDC_ISSUER", "").rstrip("/")
+    post_logout = (os.environ.get("PUBLIC_BASE_URL", "").rstrip("/") or "") + "/ui"
+    # Auth0 typically uses /v2/logout
+    if issuer:
+        return RedirectResponse(f"{issuer}/v2/logout?returnTo={post_logout}")
     return RedirectResponse("/ui")
 
 
@@ -123,3 +129,13 @@ async def mcp_page(request: Request):
             "mcp_url": mcp_url,
         },
     )
+
+
+@router.post("/disconnect-qbo")
+async def disconnect_qbo(request: Request, realm_id: str = Query(...)):
+    user_id = _uid(request)
+    if not user_id:
+        return RedirectResponse("/ui/login", status_code=302)
+
+    await db.delete_connection(user_id, realm_id)
+    return RedirectResponse("/ui", status_code=302)
