@@ -17,6 +17,21 @@ from app.qbo import (
 )
 
 
+def _ensure_utc(dt: Optional[datetime]) -> Optional[datetime]:
+    """
+    Ensure a datetime is timezone-aware in UTC.
+
+    SQLite + SQLAlchemy often returns naive datetimes even when DateTime(timezone=True).
+    Comparing naive (no tzinfo) to aware (UTC) raises:
+      "can't compare offset-naive and offset-aware datetimes"
+    """
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
 async def _resolve_realm_id(user_id: str, realm_id: Optional[str]) -> str:
     """Resolve an optional realm_id to a concrete realm_id.
 
@@ -36,20 +51,37 @@ async def _resolve_realm_id(user_id: str, realm_id: Optional[str]) -> str:
 
 async def _get_valid_access_token(user_id: str, realm_id: str) -> str:
     conn = await db.get_connection(user_id, realm_id)
+    if not conn:
+        raise ValueError(
+            f"No QuickBooks connection found for user_id={user_id} and realm_id={realm_id}. "
+            "Run the connect tool first (qbo_connect_company) and complete the Intuit OAuth flow."
+        )
+
     access_enc = conn.get("access_token_enc")
-    refresh_enc = conn["refresh_token_enc"]
-    exp = conn.get("access_token_expires_at")
+    refresh_enc = conn.get("refresh_token_enc")
+    exp = _ensure_utc(conn.get("access_token_expires_at"))
 
     access_token = decrypt(access_enc) if access_enc else None
+    if not refresh_enc:
+        raise ValueError(
+            f"QuickBooks connection exists for realm_id={realm_id} but refresh_token_enc is missing. "
+            "Reconnect the company via qbo_connect_company."
+        )
     refresh_token = decrypt(refresh_enc)
 
+    now_utc = datetime.now(timezone.utc)
+    refresh_threshold = now_utc + timedelta(seconds=30)
+
     # Refresh if missing or expiring soon
-    if (not access_token) or (not exp) or (exp <= datetime.now(timezone.utc) + timedelta(seconds=30)):
+    if (not access_token) or (exp is None) or (exp <= refresh_threshold):
         token_resp = await refresh_access_token(refresh_token)
         access_token = token_resp["access_token"]
+
         new_refresh = token_resp.get("refresh_token", refresh_token)
         expires_in = int(token_resp.get("expires_in", 3600))
-        expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
+
+        expires_at = now_utc + timedelta(seconds=expires_in)
+
         await db.upsert_connection(
             user_id=user_id,
             realm_id=realm_id,
@@ -58,6 +90,7 @@ async def _get_valid_access_token(user_id: str, realm_id: str) -> str:
             refresh_token_enc=encrypt(new_refresh),
             access_token_expires_at=expires_at,
         )
+
     return access_token
 
 
@@ -66,13 +99,25 @@ async def _get_valid_access_token(user_id: str, realm_id: str) -> str:
 # ----------------------
 
 
-async def query_company(user_id: str, realm_id: str, sql: str, *, sandbox: Optional[bool] = None) -> Dict[str, Any]:
+async def query_company(
+    user_id: str,
+    realm_id: str,
+    sql: str,
+    *,
+    sandbox: Optional[bool] = None,
+) -> Dict[str, Any]:
     token = await _get_valid_access_token(user_id, realm_id)
     data = await qbo_query(realm_id, token, sql, sandbox=sandbox)
     return {"realm_id": realm_id, "data": data}
 
 
-async def query_all(user_id: str, sql: str, limit_per_company: int = 20, *, sandbox: Optional[bool] = None) -> Dict[str, Any]:
+async def query_all(
+    user_id: str,
+    sql: str,
+    limit_per_company: int = 20,
+    *,
+    sandbox: Optional[bool] = None,
+) -> Dict[str, Any]:
     companies = await db.list_connections(user_id)
     results: List[Dict[str, Any]] = []
     errors: List[Dict[str, Any]] = []
@@ -215,4 +260,5 @@ async def search_entity(
         max_results=max_results,
         order_by=order_by,
     )
-    return await query_company(user_id, await _resolve_realm_id(user_id, realm_id), sql, sandbox=sandbox)
+    rid = await _resolve_realm_id(user_id, realm_id)
+    return await query_company(user_id, rid, sql, sandbox=sandbox)
