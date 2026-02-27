@@ -29,7 +29,7 @@ mcp = FastMCP("QBO MCP Server (OAuth + UI)", stateless_http=True, host="0.0.0.0"
 
 def _user_id() -> str:
     u = current_user.get() or {}
-    return (u.get("email") or u.get("sub") or "unknown_user").strip()
+    return (u.get("sub") or u.get("email") or "unknown_user").strip()
 
 
 # ----------------------
