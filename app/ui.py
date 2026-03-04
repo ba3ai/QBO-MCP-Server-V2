@@ -5,7 +5,7 @@ import secrets
 import hashlib
 import base64
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Request, Form
 from fastapi.responses import RedirectResponse, HTMLResponse
 from fastapi.templating import Jinja2Templates
 from fastapi import Query
@@ -115,7 +115,7 @@ async def connect_qbo(request: Request):
 
 
 @router.post("/add-access")
-async def add_access(request: Request, realm_id: str = Query(...)):
+async def add_access(request: Request, realm_id: str = Form(...)):
     """Add an already-connected company (realm_id) to the current user's dashboard.
 
     This avoids re-running Intuit OAuth (and therefore avoids the "Assign admin"
