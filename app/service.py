@@ -40,7 +40,7 @@ async def _resolve_realm_id(user_id: str, realm_id: Optional[str]) -> str:
     if realm_id:
         return realm_id
 
-    companies = await db.list_connections(user_id)
+    companies = await db.list_user_companies(user_id)
     if not companies:
         raise ValueError(
             "No QuickBooks companies connected for this user. "
@@ -50,12 +50,15 @@ async def _resolve_realm_id(user_id: str, realm_id: Optional[str]) -> str:
 
 
 async def _get_valid_access_token(user_id: str, realm_id: str) -> str:
-    conn = await db.get_connection(user_id, realm_id)
-    if not conn:
+    # Access control: user must be granted access to the company.
+    if not await db.user_has_access(user_id, realm_id):
         raise ValueError(
-            f"No QuickBooks connection found for user_id={user_id} and realm_id={realm_id}. "
-            "Run the connect tool first (qbo_connect_company) and complete the Intuit OAuth flow."
+            f"You do not have access to realm_id={realm_id}. "
+            "Ask an admin to grant you access in the dashboard, or connect the company once and share it."
         )
+
+    # Tokens are stored per-company (realm_id), not per-user.
+    conn = await db.get_company_connection(realm_id)
 
     access_enc = conn.get("access_token_enc")
     refresh_enc = conn.get("refresh_token_enc")
@@ -82,8 +85,7 @@ async def _get_valid_access_token(user_id: str, realm_id: str) -> str:
 
         expires_at = now_utc + timedelta(seconds=expires_in)
 
-        await db.upsert_connection(
-            user_id=user_id,
+        await db.upsert_company_connection(
             realm_id=realm_id,
             company_name=conn.get("company_name"),
             access_token_enc=encrypt(access_token),
@@ -118,7 +120,7 @@ async def query_all(
     *,
     sandbox: Optional[bool] = None,
 ) -> Dict[str, Any]:
-    companies = await db.list_connections(user_id)
+    companies = await db.list_user_companies(user_id)
     results: List[Dict[str, Any]] = []
     errors: List[Dict[str, Any]] = []
     for c in companies:

@@ -12,15 +12,14 @@
       color: #e6e8ef;
     }
 
-    a {
-      color: #9ad1ff;
-    }
+    a { color: #9ad1ff; }
 
     .top {
       display: flex;
       justify-content: space-between;
       align-items: center;
       margin-bottom: 18px;
+      gap: 12px;
     }
 
     .card {
@@ -39,32 +38,59 @@
       background: #0f1730;
       text-decoration: none;
       color: #FFFFFF;
+      cursor: pointer;
     }
 
-    .btn:hover {
-      background: #142048;
-    }
+    .btn:hover { background: #142048; }
 
-    .muted {
-      color: #9aa6c0;
-    }
+    .muted { color: #9aa6c0; }
 
     table {
       width: 100%;
       border-collapse: collapse;
     }
 
-    td,
-    th {
+    td, th {
       padding: 10px;
       border-bottom: 1px solid #1f2a44;
       text-align: left;
+      vertical-align: top;
     }
 
     code {
       background: #0f1730;
       padding: 2px 6px;
       border-radius: 8px;
+    }
+
+    .row-actions form { display: inline; margin-right: 8px; }
+
+    input[type="text"]{
+      background: #0f1730;
+      border: 1px solid #2b3b63;
+      color: #e6e8ef;
+      padding: 10px 12px;
+      border-radius: 12px;
+      width: 320px;
+      max-width: 100%;
+      outline: none;
+    }
+
+    .inline {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .pill {
+      display: inline-block;
+      padding: 2px 8px;
+      border: 1px solid #2b3b63;
+      border-radius: 999px;
+      font-size: 12px;
+      color: #cbd5f0;
+      background: #0f1730;
     }
   </style>
 </head>
@@ -75,17 +101,96 @@
       <h1 style="margin:0;">QBO MCP Server</h1>
       <div class="muted">Signed in as: {{ user.name or user.email or user.sub }}</div>
     </div>
-    <div><a class="btn" href="/ui/logout">Logout</a></div>
+    <div class="inline">
+      <a class="btn" href="/ui/mcp">MCP Setup</a>
+      <a class="btn" href="/ui/logout">Logout</a>
+    </div>
   </div>
 
+  <!-- Step 1: Connect via OAuth (only needed once per company) -->
   <div class="card">
-    <h3 style="margin-top:0;">Step 1: Connect QuickBooks</h3>
-    <p class="muted">Connect a client/company (realmId) via Intuit OAuth. Repeat for each client company.</p>
+    <h3 style="margin-top:0;">Step 1 (one-time per company): Connect QuickBooks</h3>
+    <p class="muted">
+      Connect a client/company (realmId) via Intuit OAuth. Only one user needs to do this once per company.
+      After that, other admins can add access without connecting again.
+    </p>
     <a class="btn" href="/ui/connect-qbo">Connect QBO Company</a>
   </div>
 
+  <!-- Step 1.5: Add access (no OAuth) -->
   <div class="card">
-    <h3 style="margin-top:0;">Connected Companies</h3>
+    <h3 style="margin-top:0;">Add company to my dashboard (no OAuth)</h3>
+    <p class="muted">
+      If the company is already connected by someone else, paste the <code>realmId</code> to add it to your dashboard.
+    </p>
+    <form method="post" action="/ui/add-access" class="inline">
+      <input type="text" name="realm_id" placeholder="Realm ID (e.g., 1231467890)" required />
+      <button class="btn" type="submit">Add Access</button>
+    </form>
+    {% if access_message %}
+      <p class="muted" style="margin-top:10px;">{{ access_message }}</p>
+    {% endif %}
+  </div>
+
+  <!-- My Companies (access-based) -->
+  <div class="card">
+    <h3 style="margin-top:0;">My Companies (I can use)</h3>
+    <p class="muted">
+      These companies are available to you in ChatGPT tools. (Access is managed in-app; no need to re-connect.)
+    </p>
+
+    {% if my_companies and my_companies|length > 0 %}
+    <table>
+      <thead>
+        <tr>
+          <th>Realm ID</th>
+          <th>Company Name</th>
+          <th>Role</th>
+          <th>Updated</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for c in my_companies %}
+        <tr>
+          <td><code>{{ c.realm_id }}</code></td>
+          <td>{{ c.company_name or "-" }}</td>
+          <td><span class="pill">{{ c.role or "user" }}</span></td>
+          <td class="muted">{{ c.updated_at }}</td>
+          <td class="row-actions">
+            <!-- Remove only MY access (does not disconnect company globally) -->
+            <form method="post" action="/ui/remove-access">
+              <input type="hidden" name="realm_id" value="{{ c.realm_id }}" />
+              <button class="btn" type="submit">Remove from my dashboard</button>
+            </form>
+
+            <!-- Optional: set default company for queries -->
+            {% if c.is_default %}
+              <span class="pill">Default</span>
+            {% else %}
+              <form method="post" action="/ui/set-default-company">
+                <input type="hidden" name="realm_id" value="{{ c.realm_id }}" />
+                <button class="btn" type="submit">Set as default</button>
+              </form>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="muted">No companies in your dashboard yet. Connect one, or add access by realmId.</p>
+    {% endif %}
+  </div>
+
+  <!-- Optional: System-wide connected companies (admin-only view) -->
+  {% if companies is defined %}
+  <div class="card">
+    <h3 style="margin-top:0;">System Connected Companies (admin only)</h3>
+    <p class="muted">
+      These are connected in the system (token stored per company). Disconnecting here affects everyone.
+    </p>
+
     {% if companies and companies|length > 0 %}
     <table>
       <thead>
@@ -102,9 +207,10 @@
           <td><code>{{ c.realm_id }}</code></td>
           <td>{{ c.company_name or "-" }}</td>
           <td class="muted">{{ c.updated_at }}</td>
-          <td>
-            <form method="post" action="/ui/disconnect-qbo?realm_id={{ c.realm_id }}" style="display:inline;">
-              <button class="btn" type="submit">Disconnect</button>
+          <td class="row-actions">
+            <form method="post" action="/ui/disconnect-qbo">
+              <input type="hidden" name="realm_id" value="{{ c.realm_id }}" />
+              <button class="btn" type="submit">Disconnect (global)</button>
             </form>
           </td>
         </tr>
@@ -115,6 +221,7 @@
     <p class="muted">No companies connected yet.</p>
     {% endif %}
   </div>
+  {% endif %}
 
   <div class="card">
     <h3 style="margin-top:0;">Step 2: Use in ChatGPT</h3>

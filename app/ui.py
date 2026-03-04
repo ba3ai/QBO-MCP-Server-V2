@@ -114,6 +114,27 @@ async def connect_qbo(request: Request):
     return RedirectResponse(f"/intuit/connect?state={user_id}")
 
 
+@router.post("/add-access")
+async def add_access(request: Request, realm_id: str = Query(...)):
+    """Add an already-connected company (realm_id) to the current user's dashboard.
+
+    This avoids re-running Intuit OAuth (and therefore avoids the "Assign admin"
+    prompt) for users who just need access in your app.
+    """
+    user_id = _uid(request)
+    if not user_id:
+        return RedirectResponse("/ui/login", status_code=302)
+
+    try:
+        # Ensure the company is connected server-side.
+        await db.get_company_connection(realm_id)
+    except Exception as e:
+        return HTMLResponse(f"Company realm_id={realm_id} is not connected yet. Ask an admin to connect it first. ({e})", status_code=400)
+
+    await db.grant_access(user_id=user_id, realm_id=realm_id, role="admin")
+    return RedirectResponse("/ui", status_code=302)
+
+
 @router.get("/mcp", response_class=HTMLResponse)
 async def mcp_page(request: Request):
     user_id = _uid(request)
