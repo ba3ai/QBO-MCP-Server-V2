@@ -153,7 +153,7 @@ async def mcp_page(request: Request):
 
 
 @router.post("/disconnect-qbo")
-async def disconnect_qbo(request: Request, realm_id: str = Query(...)):
+async def disconnect_qbo(request: Request, realm_id: str = Form(...)):
     user_id = _uid(request)
     if not user_id:
         return RedirectResponse("/ui/login", status_code=302)
