@@ -10,3 +10,4 @@ mcp
 python-jose[cryptography]
 jinja2
 itsdangerous
+asyncpg
